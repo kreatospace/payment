@@ -21,12 +21,10 @@ if (!DEPLOYER_PRIVATE_KEY) {
 
 const config: HardhatUserConfig = {
   solidity: {
-    version: "0.8.20",
+    version: "0.8.24",  // ← was 0.8.20
     settings: {
-      optimizer: {
-        enabled: true,
-        runs: 200, // good default for contracts with frequent calls
-      },
+      optimizer: { enabled: true, runs: 200 },
+      evmVersion: "cancun",  // ← add this
     },
   },
 
