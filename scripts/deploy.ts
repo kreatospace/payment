@@ -32,13 +32,15 @@ async function main() {
   const platformWallet = process.env.PLATFORM_WALLET;
   const [deployer] = await ethers.getSigners();
 
-  console.log("Network:", network.name);
-  console.log("Deployer:", deployer.address);
-  console.log("Platform Wallet:", platformWallet);
+  console.log("Network    :", network.name);
+  console.log("Deployer   :", deployer.address);
+  console.log("Platform   :", platformWallet);
+  console.log("Fee model  : dynamic (feeBps passed per call, MAX 10%)");
 
   if (!platformWallet || !isAddress(platformWallet)) {
     throw new Error("Invalid or missing PLATFORM_WALLET");
   }
+
   let usdcAddress: string;
 
   if (network.name === "mainnet") {
@@ -56,48 +58,62 @@ async function main() {
     usdcAddress = await usdc.getAddress();
     console.log("\nMock USDC deployed to:", usdcAddress);
 
-    // Mint ke diri sendiri
-    const mintAmount = ethers.parseUnits("1000", 6); // 1000 USDC
-    console.log("Minted 1000 USDC to:", deployer.address);
-
+    const mintAmount = ethers.parseUnits("1000", 6);
     const mintTx = await usdc.mint(deployer.address, mintAmount);
-    await mintTx.wait(); // 🔥 WAJIB
+    await mintTx.wait();
+    console.log("Minted 1000 USDC to:", deployer.address);
   }
 
   // ─── Deploy KreatoPayment ─────────────────────────
   const KreatoPayment = await ethers.getContractFactory("KreatoPayment");
-
   let paymentAddress: string;
 
   try {
     const payment = await KreatoPayment.deploy(platformWallet);
     await payment.waitForDeployment();
     paymentAddress = await payment.getAddress();
+    console.log("\nKreatoPayment deployed to:", paymentAddress);
   } catch (e: any) {
     // Known hardhat-ethers v3 bug: getTransaction() throws BAD_DATA for
     // deployment txs because ethers v6 rejects null "to" field.
-    // The contract is already on-chain — recover address from receipt.
     if (e?.code === "BAD_DATA" && e?.shortMessage?.includes("value.to")) {
-      const deployTx = await KreatoPayment.getDeployTransaction(platformWallet);
       const [signer] = await ethers.getSigners();
-      const nonce = await signer.getNonce() - 1; // tx already sent
-      paymentAddress = ethers.getCreateAddress({
-        from: signer.address,
-        nonce,
-      });
+      const nonce = await signer.getNonce() - 1;
+      paymentAddress = ethers.getCreateAddress({ from: signer.address, nonce });
       console.warn("⚠️  Caught known hardhat-ethers bug — recovered address from CREATE derivation");
+      console.log("\nKreatoPayment deployed to:", paymentAddress);
     } else {
       throw e;
+    }
+  }
+
+  // ─── Verify on Etherscan (mainnet / base only) ────
+  if (network.name === "mainnet" || network.name === "base") {
+    console.log("\nVerifying KreatoPayment on Etherscan...");
+    try {
+      await run("verify:verify", {
+        address: paymentAddress,
+        constructorArguments: [platformWallet],
+      });
+      console.log("✅ Verified");
+    } catch (e: any) {
+      if (e?.message?.includes("Already Verified")) {
+        console.log("ℹ️  Already verified");
+      } else {
+        console.warn("⚠️  Verify failed:", e?.message);
+      }
     }
   }
 
   // ─── ENV output ───────────────────────────────────
   const keys = getEnvKeys(network.name);
 
-  console.log("\n─── ENV ───────────────────────────");
+  console.log("\n─── ENV ───────────────────────────────────────────");
   console.log(`${keys.payment}=${paymentAddress}`);
   console.log(`${keys.usdc}=${usdcAddress}`);
   console.log(`PLATFORM_WALLET=${platformWallet}`);
+  console.log("───────────────────────────────────────────────────");
+  console.log("NOTE: feeBps dikirim per-call dari frontend (0–1000 bps)");
 }
 
 main().catch((err) => {
